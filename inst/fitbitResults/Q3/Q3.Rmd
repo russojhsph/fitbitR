@@ -1,0 +1,130 @@
+Question 3
+====================================================================================================
+
+__Goal__: infer whether there are difference between weekdays and weekends in patterns of activity
+
+Written by [Russo](https://github.com/russojhsph/fitbitR).
+
+To make it easier for me to write this document, the interpretation of each plot is included as comments in the R code. So toggle the R code to view the comments and interpretation if you are curious.
+
+# Setup
+
+```{r setup}
+## Packages used
+library(fitbitR)
+require(ggplot2)
+require(mgcv)
+
+## Load the data
+data <- preprocess(fitbitData)
+
+## Complete predictions
+types <- c("lm", "poisson", "means", "overall-mean")
+datap <- lapply(types, function(x) { fitbitPred(data, method=x)})
+
+## All data
+all <- c(list(data), datap)
+names(all) <- c("original", types)
+```
+
+# GAM
+
+This section is inspired by Q2.
+
+## Separating by weekday vs weekend
+
+```{r gamweekend, fig.width=10}
+## Fitting a GAM (poisson) by interval with data grouped by Day.
+ggplot(data, aes(x=Interval, y=nSteps, group=Weekend)) + geom_point(size=0.5, na.rm=TRUE) + facet_grid(~Weekend) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=poisson)
+ggplot(data, aes(x=IntS, y=nSteps, group=Weekend)) + geom_point(size=0.5, na.rm=TRUE) + facet_grid(~Weekend) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=poisson)
+
+## Same but with quasipoisson.
+ggplot(data, aes(x=Interval, y=nSteps, group=Weekend)) + geom_point(size=0.5, na.rm=TRUE) + facet_grid(~Weekend) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=quasipoisson)
+ggplot(data, aes(x=IntS, y=nSteps, group=Weekend)) + geom_point(size=0.5, na.rm=TRUE) + facet_grid(~Weekend) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=quasipoisson)
+ggplot(data, aes(x=IntS, y=nSteps, group=Weekend)) + geom_point(alpha=1/4, na.rm=TRUE) + facet_grid(~Weekend) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=quasipoisson)
+ggplot(data, aes(x=IntS, y=nSteps, group=Weekend)) + geom_point(alpha=1/4, na.rm=TRUE, colour="orange") + facet_grid(~Weekend) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=quasipoisson)
+```
+
+## By interval & day of the week
+
+
+```{r gamdow, fig.width=12}
+## Fitting a GAM (poisson) by interval with data grouped by Day.
+ggplot(data, aes(x=Interval, y=nSteps, group=Day)) + geom_point(size=0.5, na.rm=TRUE) + facet_grid(~Day) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=poisson)
+ggplot(data, aes(x=IntS, y=nSteps, group=Day)) + geom_point(size=0.5, na.rm=TRUE) + facet_grid(~Day) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=poisson)
+
+## Same but with quasipoisson.
+ggplot(data, aes(x=Interval, y=nSteps, group=Day)) + geom_point(size=0.5, na.rm=TRUE) + facet_grid(~Day) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=quasipoisson)
+ggplot(data, aes(x=IntS, y=nSteps, group=Day)) + geom_point(size=0.5, na.rm=TRUE) + facet_grid(~Day) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=quasipoisson)
+```
+
+## Model
+
+Next I fit a GAM model with the poisson and quasipoisson families adding the Weekend as a covariate.
+
+```{r model}
+fit <- gam(nSteps ~ s(IntS, bs="cr") + Weekend, data=data, family=poisson)
+summary(fit)
+fit2 <- gam(nSteps ~ s(IntS, bs="cr") + Weekend, data=data, family=quasipoisson)
+summary(fit2)
+```
+
+* The quasipoisson seems like a better option because it estimates the variance which is a problem as seen before due to the overdispersion.
+* There is a significant difference between Weekdays and Weekends.
+
+```{r q3ci}
+## CI for the Weekend coef
+est <- fit2$coef["WeekendWeekend"] 
+est.sd <- sqrt(vcov(fit2)["WeekendWeekend","WeekendWeekend"])
+t <- qt(0.975, df=fit2$df.null)
+## I'm getting the CI without /sqrt(n) because it's the SE already.
+exp(est + c(-1, 1) * t * est.sd)
+```
+
+
+## Prediction
+
+Next I check whether the results are influenced by using the data with predictions.
+
+```{r modelpred}
+
+fits <- lapply(all, function(data) { gam(nSteps ~ s(IntS, bs="cr") + Weekend, data=data, family=quasipoisson) })
+lapply(fits, summary)
+```
+From the results, the result that there is a significant difference between weekends and weekdays remains invariant to which prediction is used.
+
+## Weekday and Date
+
+```{r weekday}
+fitd <- gam(nSteps ~ s(IntS, bs="cr") + Date, data=data, family=quasipoisson)
+summary(fitd)
+fitw <- gam(nSteps ~ s(IntS, bs="cr") + Day + Date, data=data, family=quasipoisson)
+summary(fitw)
+```
+
+* Interestingly, the Date coefficient is not significant. So this person seems rather consistent. 
+* There are significative differences between Tuesday to Sunday vs Monday.
+
+# Using q3()
+
+Now I can proceed to summarize the results using q3() which basically fit the corresponding GAM model and makes a plot of the data.
+
+```{r q3fun}
+q3.weekend <- q3(data, "weekend")
+summary(q3.weekend$fit)
+q3.dow <- q3(data, "dow")
+summary(q3.dow$fit)
+```
+
+
+
+
+
+# Reproducibility
+
+```{r reproducibility}
+sessionInfo()
+print(proc.time())
+```
+
+

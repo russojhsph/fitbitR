@@ -1,0 +1,87 @@
+Question 2
+======================================================================
+
+__Goal__: infer the average activity pattern over time (within a day)
+
+Written by [Russo](https://github.com/russojhsph/fitbitR).
+
+To make it easier for me to write this document, the interpretation of each plot is included as comments in the R code. So toggle the R code to view the comments and interpretation if you are curious.
+
+# Setup
+
+```{r setup}
+## Packages used
+library(fitbitR)
+require(ggplot2)
+require(mgcv)
+
+## Load the data
+data <- preprocess(fitbitData)
+
+## Complete predictions
+types <- c("lm", "poisson", "means", "overall-mean")
+datap <- lapply(types, function(x) { fitbitPred(data, method=x)})
+
+## All data
+all <- c(list(data), datap)
+names(all) <- c("original", types)
+```
+
+# Mean by interval
+
+```{r meanint}
+
+## Mean by interval
+intMean <- function(data) {
+	tapply(data$nSteps, data$Interval, mean, na.rm=TRUE)
+}
+meanint <- lapply(all, intMean)
+
+## Plot the mean for each data set
+lapply(names(meanint), function(x) { plot(meanint[[x]], main=x, xlab="IntS", ylab="Number of steps", type="o")})
+```
+
+This gives us an idea of the overall activity pattern by day. 
+
+
+# GAM
+
+Another approach is to use a GAM model which can lead into question 3 where we will want to check if there is a difference between weekends and weekdays. The GAM model will smooth the data and will have some trouble fitting the high-peaks, but will overall give a good idea of the average activity pattern by day.
+
+```{r gamind}
+
+## Transform the Interval to a scale in 0 to 287: added this to preprocess()
+## Initial GAM using the poisson family.
+ggplot(data, aes(x=IntS, y=nSteps)) + geom_point(size=0.5, na.rm=TRUE) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=poisson)
+
+## Again but with a quasipoisson family which should be better given the overdispersion detected earlier.
+ggplot(data, aes(x=IntS, y=nSteps)) + geom_point(size=0.5, na.rm=TRUE) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=quasipoisson)
+
+## The same but using Interval instead of IntS. The curves look similar but it's easier to visualize the actual time of the day.
+ggplot(data, aes(x=Interval, y=nSteps)) + geom_point(size=0.5, na.rm=TRUE) + stat_smooth(method=gam, formula= y ~ s(x, bs="cr"), na.rm=TRUE, family=quasipoisson)
+```
+
+In summary, this person has a high peak of activity between 6 and 9 am. Then it stabilizes from 10 am to 4 pm. There is a slight increase at 5 and 6 pm and decreases until very low levels at 10 pm. The person is rarely active from 11 pm to 5 am.
+
+
+# Using q2()
+
+Now I can use q2() to get the activity pattern either using the mean or the gam method.
+
+```{r q2fun}
+q2.mean <- q2(data, "mean")
+q2.gam <- q2(data, "gam")
+```
+
+The mean method is much more variable than the GAM method and it is harder to interpret. However, the large activity peak is more noticable.
+
+
+
+# Reproducibility
+
+```{r reproducibility}
+sessionInfo()
+print(proc.time())
+```
+
+

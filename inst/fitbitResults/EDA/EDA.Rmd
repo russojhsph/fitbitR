@@ -1,0 +1,126 @@
+Exploratory data analysis
+=========================
+
+Written by [Russo](https://github.com/russojhsph/fitbitR).
+
+To make it easier for me to write this document, the interpretation of each plot is included as comments in the R code. So toggle the R code to view the comments and interpretation if you are curious.
+
+# Setup
+
+```{r setup}
+## Packages used
+library(fitbitR)
+require(ggplot2)
+```
+
+# Basic exploration
+
+```{r basicExploration}
+## Load the data
+data <- preprocess(fitbitData)
+
+## Note that the number of rows corresponds to ncol * nrow from fitbitData
+dim(data); ncol(fitbitData) * nrow(fitbitData)
+head(data)
+
+## Note that there are 2304 NA's because 8 days have missing data.
+summary(data)
+sum(is.na(data$nSteps)) / nrow(fitbitData)
+```
+
+# Number of steps distribution
+
+```{r nSteps}
+## Histogram and density plot for the number of steps at a given interval
+hist(data$nSteps, freq=FALSE, col="light blue")
+lines(density(data$nSteps[!is.na(data$nSteps)]), col="red")
+
+## Histogram with log-transformed data. There seem to be two modes.
+hist(log(data$nSteps), freq=FALSE, col="light blue")
+lines(density(log(data$nSteps[!is.na(data$nSteps)])), col="red")
+
+## Could the number of steps look like a Poisson?
+## Estimate lambda
+l <- mean(data$nSteps, na.rm=TRUE)
+
+## Does the mean look very different from the variance? Yes, it's very different.
+l
+var(data$nSteps, na.rm=TRUE)
+
+## Generate some random poisson data to compare against the observed data
+set.seed(20130605)
+rand <- rpois(nrow(data), l)
+
+## Doesn't look like poisson dist is kept at all.
+qqplot(rand, data$nSteps)
+qqline(data$nSteps, distribution = function(p) qpois(p, lambda = l) )
+
+## Normal looking in log scale? Nope.
+qqnorm(log(data$nSteps + 1))
+
+```
+
+
+# Displaying with points
+
+```{r scatter}
+
+## Ok as an entry plot. Can clearly notice the NA's.
+ggplot(data, aes(y=Date, x=Interval, colour=nSteps)) + geom_point()
+
+## The one issue here is that NA's look like high activity days
+ggplot(data, aes(y=Date, x=Interval, colour=Weekend, alpha=nSteps)) + geom_point()
+
+## Size can get a tad big and overlap other days
+ggplot(data, aes(y=Date, x=Interval, colour=Weekend, size=nSteps)) + geom_point()
+
+## I like this plot. It's easy to notice the NA's, the weekday vs weekend and the activity peak: 8 am on weekdays.  Specially for 2 and 3rd week of October.
+ggplot(data, aes(y=Date, x=Interval, colour=nSteps)) + geom_point() + facet_grid(~ Weekend)
+
+## NA's are not visible, but the activity peaks are easier to note. 
+ggplot(data, aes(x=Interval, y=nSteps, group=Date, colour=Day, alpha=nSteps)) + geom_point() + facet_grid(~Weekend)
+```
+
+# Displaying with lines
+
+```{r curves}
+
+## This one summarizes all the information across different dates. Colours overlap too much.
+ggplot(data, aes(x=Interval, y=nSteps, colour=Weekend)) + geom_line()
+
+## An improvement, now summarizing by day of the week. It's easy to see the winner by interval, but not the information within it due to colours overlapping.
+ggplot(data, aes(x=Interval, y=nSteps, colour=Day)) + geom_line(alpha=1/2) + facet_grid(~Weekend)
+
+## A rather unuseful plot.
+ggplot(data, aes(x=Interval, y=nSteps)) + geom_line() + facet_grid(~Weekend)
+
+## Colour helps, but the information looked better when using points.
+ggplot(data, aes(x=Interval, y=nSteps, group=Date, colour=Day)) + geom_line() + facet_grid(~Weekend)
+
+## It looks a tad better, but you can't really notice much the difference by dates.
+ggplot(data, aes(x=Interval, y=nSteps, group=Date, colour=Weekend)) + geom_line() + facet_grid(~ Day)
+```
+
+# Polar display
+
+```{r polar}
+## This plot is good for noticing the difference by hour (interval) and the overall maximum by merging across dates.
+ggplot(data, aes(x=Interval, y=nSteps, colour=Weekend)) + geom_line() + coord_polar()
+
+## Messier plot and it's harder to notice the differences though the variability is more apparent.
+ggplot(data, aes(x=Interval, y=nSteps, colour=Weekend, group=Date)) + geom_line() + coord_polar()
+
+## I think that this is one of the plots that I like the most so far. It further improves the points plot from earlier by taking advantage of the polar display to clearly notice the hours of no activity..
+ggplot(data, aes(x=Interval, y=nSteps, group=Date, colour=Day, alpha=nSteps)) + geom_point()  + coord_polar() + facet_grid(~Weekend)
+```
+
+
+
+# Reproducibility
+
+```{r reproducibility}
+sessionInfo()
+print(proc.time())
+```
+
+

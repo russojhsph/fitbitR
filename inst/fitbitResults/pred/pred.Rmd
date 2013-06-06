@@ -1,0 +1,300 @@
+Predict missing activity patterns
+==============================================================
+
+Written by [Russo](https://github.com/russojhsph/fitbitR).
+
+To make it easier for me to write this document, the interpretation of each plot is included as comments in the R code. So toggle the R code to view the comments and interpretation if you are curious.
+
+# Setup
+
+```{r setup}
+## Packages used
+library(fitbitR)
+require(splines)
+require(xts)
+require(randomForest)
+require(cvTools)
+require(car)
+require(plyr)
+
+## Load the data
+data <- preprocess(fitbitData)
+```
+
+# Model exploration
+
+## Linear models 
+
+None of the linear models seem to be doing any good. It is mostly because the distribution of the number of steps is not normal.
+
+```{r lm}
+## Basic linear model
+fit <- lm(nSteps ~ Interval + Date + Day, data=data)
+summary(fit)
+plot(fit)
+
+## Using natural splines
+fit2 <- lm(nSteps ~ ns(Interval, 10) + Date + Day, data=data)
+summary(fit2)
+plot(fit2)
+
+## Using polynomials
+fit3 <- lm(nSteps ~ poly(Interval, 10) + Date + Day, data=data)
+summary(fit3)
+plot(fit3)
+```
+
+When using the log-transformed number of steps, the models look a bit better. Specially in the qqnorm plot.
+
+```{r lmlog}
+
+## Using natural splines
+fit4 <- lm(log(nSteps + 1) ~ ns(Interval, 10) + Date + Day, data=data)
+summary(fit4)
+plot(fit4)
+
+## Using polynomials
+fit5 <- lm(log(nSteps + 1) ~ poly(Interval, 10) + Date + Day, data=data)
+summary(fit5)
+plot(fit5)
+```
+
+## Time series
+
+```{r ts}
+## Format the data into a time series object using the xts library
+ts.steps <- xts(data$nSteps, order.by=data$Time)
+
+## Interesting out of the box plot, but we can't tell NA's apart from low values.
+plot(ts.steps, ylab="Number of steps")
+
+## Keep only the complete data
+datac <- data[complete.cases(data),]
+ts.c <- xts(datac$nSteps, order.by=datac$Time)
+
+## We can see the NA's with this plot and also the whole data. However, we it's hard to notice the exact time.
+plot(ts.c, ylab="Number of steps")
+
+## Autocorrelation plot. Ok, there is lots of auto-correlation with previous days!
+acf(ts.c)
+
+## Fit arima models
+fit.a <- arima(ts.c)
+fit.a2 <- arima(ts.steps)
+
+## Arima model is the same whether the NA's are removed or not. So this function does remove the NA's properly.
+fit.a
+fit.a2
+
+## Doesn't look any good for prediction though since all the values are the same.
+predict(fit.a, 10)
+
+## ARIMA model with interval as a covariate
+fit.a3 <- arima(ts.c, xreg=datac$Interval)
+fit.a3
+## Predictions do not look good at all.
+preds.a3 <- predict(fit.a3, 288, newxreg= head(datac$Interval, 288))
+plot(preds.a3$pred)
+
+## 
+fit.a4 <- arima(ts.c, order=c(1, 1, 1))
+fit.a4
+
+## AR model. The prediction function doesn't seem like what I'm looking for.
+fit.ar <- ar(ts.c)
+fit.ar
+plot(predict(fit.ar, n.ahead=10)$pred)
+
+```
+
+## GLM
+
+```{r glm}
+## GLM
+fit.g <- glm(nSteps ~ Interval + Date + Day, data=data, family=poisson)
+summary(fit.g)
+
+## Overdispersion?
+fit.g2 <- glm(nSteps ~ Interval + Date + Day, data=data, family=quasipoisson)
+## Overdispersion parameter is rather high
+summary(fit.g2)
+```
+
+## Random forest
+
+```{r rf}
+## Regression-based random forest.
+fit.rf <- randomForest(nSteps ~ Interval + Date + Day + Weekend, data = datac, importance = TRUE, keep.forest = TRUE, ntree = 100)
+## 
+plot(fit.rf)
+## So using Weekend is not informative.
+varImpPlot(fit.rf)
+
+fit.rf2 <- randomForest(nSteps ~ Interval + Date + Day, data = datac, importance = TRUE, keep.forest = TRUE, ntree = 100)
+## The error is lower in this plot than for the previous rf.
+plot(fit.rf2)
+## Interesting how the variables alternate locations.
+varImpPlot(fit.rf2)
+```
+
+# Split data
+
+Now it is time to evaluate some predictions. For that, I will split the complete data in two sections: training and evaluation.
+
+```{r datasets}
+## Get the days that are actually complete
+dates <- unique(datac$Date)
+length(dates)
+
+## Generate the sampling index
+set.seed(20130605)
+idx <- sample(c(TRUE, FALSE), length(dates), replace=TRUE, prob=c(0.7, 0.3))
+
+## Check that the groups are around 30 and 70%
+table(idx) / length(idx) * 100
+
+## Separate the data
+datat <- datac[datac$Date %in% dates[idx],]
+datae <- datac[datac$Date %in% dates[!idx],]
+
+## Ok, data sets are ready to be used.
+dim(datat)
+dim(datae)
+```
+
+# Prediction models
+
+## Using means
+
+The most simple thing would be to use the means for similar observations (aka, grouped by interval and day of the week).
+
+```{r predmean}
+
+## Summarize the information by Interval & Day group.
+means <- ddply(datat, .(Interval, Day), summarize, meanNsteps = mean(nSteps))
+dim(means)
+head(means)
+findMean <- function(int, d, dat=means) {
+	res <- subset(dat, Interval==int & Day==d)$meanNsteps
+	if(length(res) == 0)
+		print(paste(int, d))
+	return(res)
+}
+p.m <- apply(datae[, c("Interval", "Day")], 1, function(x) { findMean(as.integer(x[1]), x[2])})
+e.m <- rmspe(datae$nSteps, p.m, includeSE = TRUE)
+## Ok, now I have a benchmark to use.
+e.m
+
+## What if I just use the overall mean of the observed data?
+p.m2 <- rep(mean(datat$nSteps), nrow(datae))
+e.m2 <- rmspe(datae$nSteps, p.m2, includeSE=TRUE)
+## Hm... it performs slightly better.
+e.m2
+
+## How do the predictions look? Well, using means everything seems all over the place.
+plot(p.m, datae$nSteps)
+
+
+```
+
+
+## Linear models
+
+```{r predlm}
+## lm with log data and natural splines
+f.lm1 <- lm(log(nSteps + 1) ~ ns(Interval, 10) + Date + Day, data=datat)
+summary(f.lm1)
+
+## Using polynomials with log data
+f.lm2 <- lm(log(nSteps + 1) ~ poly(Interval, 10) + Date + Day, data=datat)
+summary(f.lm2)
+
+## lm with ns but no log (should be poor)
+f.lm3 <- lm(nSteps ~ ns(Interval, 10) + Date + Day, data=datat)
+summary(f.lm3)
+
+## Make predictions and return to regular scale
+p.lm1 <- exp(predict(f.lm1, datae)) - 1
+p.lm2 <- exp(predict(f.lm2, datae)) - 1
+p.lm3 <- predict(f.lm3, datae)
+p.lm3[p.lm3 < 0] <- 0
+p.lm <- data.frame(lm1 = p.lm1, lm2 = p.lm2, lm3 = p.lm3)
+
+## Leeks look how related are the predictions
+
+## Now, this looks rather crazy! (interesting!) Must be because of the splines.
+scatterplotMatrix( ~ datae$nSteps + lm1 + lm2 + lm3, data=p.lm)
+
+## Time to evaluate
+e.lm <- apply(p.lm, 2, function(x) { rmspe(datae$nSteps, x, includeSE = TRUE) })
+## I'm surprised the truncated regression did better than with log-transformed data.
+e.lm
+```
+
+## GLM
+
+```{r predglm}
+## GLM
+f.g1 <- glm(nSteps ~ Interval + Date + Day, data=datat, family=poisson)
+summary(f.g1)
+
+## Overdispersion?
+f.g2 <- glm(nSteps ~ Interval + Date + Day, data=datat, family=quasipoisson)
+## Overdispersion parameter is rather high
+summary(f.g2)
+
+## Lets try combining the GLM with ns
+f.g3 <- glm(nSteps ~ ns(Interval, 10) + Date + Day, data=datat, family=poisson)
+summary(f.g3)
+
+## What if I increase the number of df in the ns? Say 1 per hour
+f.g4 <- glm(nSteps ~ ns(Interval, 24) + Date + Day, data=datat, family=poisson)
+summary(f.g4)
+
+## Make the predictions
+p.g1 <- predict(f.g1, datae, type="response")
+p.g2 <- predict(f.g2, datae, type="response")
+p.g3 <- predict(f.g3, datae, type="response")
+p.g4 <- predict(f.g4, datae, type="response")
+
+## g1 and g2 agree completely. They also have a lower range compared to g3.
+p.g <- data.frame(g1 = p.g1, g2 = p.g2, g3 = p.g3, g4 = p.g4)
+scatterplotMatrix( ~ datae$nSteps + g1 + g2 + g3 + g4, data=p.g)
+
+## Evaluation time
+e.g <- apply(p.g, 2, function(x) { rmspe(datae$nSteps, x, includeSE = TRUE) })
+## g3 performed rather similarly to lm3. Increasing the number of df in ns() actually performed a bit worse than with less df on the ns.
+e.g
+```
+
+## Random forest
+
+```{r predrf}
+f.rf <- randomForest(nSteps ~ Interval + Date + Day, data = datat, importance = TRUE, keep.forest = TRUE, ntree = 400)
+p.rf <- predict(f.rf, datae)
+## No 0's, but anyhow, I'll still truncate to 0 for reproducibility (with other data).
+summary(p.rf)
+p.rf[p.rf < 0] <- 0
+e.rf <- rmspe(datae$nSteps, p.rf, includeSE = TRUE)
+## The rf didn't really improve vs other predictions
+e.rf
+```
+
+# Summary
+
+```{r predsummary}
+scatterplotMatrix( ~ datae$nSteps + p.m + p.lm3 + p.g3 + p.rf)
+err <- data.frame("Means" = unlist(e.m), "Overall-Mean"= unlist(e.m2), "LM" = unlist(e.lm[["lm3"]]), "GLM-Pois"=unlist(e.g[["g3"]]), "RF"=unlist(e.rf))
+## The difference between lm3 and g3 is very small, so much that the difference in the SE seems like the deciding factor.
+err
+```
+
+
+# Reproducibility
+
+```{r reproducibility}
+sessionInfo()
+print(proc.time())
+```
+
+

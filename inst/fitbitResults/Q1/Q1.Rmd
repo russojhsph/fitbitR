@@ -1,0 +1,171 @@
+Question 1
+==============================================================
+
+__Goal__: estimate the average number of steps taken per day
+
+Written by [Russo](https://github.com/russojhsph/fitbitR).
+
+To make it easier for me to write this document, the interpretation of each plot is included as comments in the R code. So toggle the R code to view the comments and interpretation if you are curious.
+
+# Setup
+
+```{r setup}
+## Packages used
+library(fitbitR)
+require(xts)
+require(forecast)
+
+## Load the data
+data <- preprocess(fitbitData)
+
+## Complete predictions
+types <- c("lm", "poisson", "means", "overall-mean")
+datap <- lapply(types, function(x) { fitbitPred(data, method=x)})
+
+## All data
+all <- c(list(data), datap)
+names(all) <- c("original", types)
+
+```
+
+# Simple mean
+
+Below I take the sample mean and deviation after binning by day.
+
+```{r simplest}
+## This is the simplest solution although it might have some problems.
+simpleM <- function(data) {
+	mean(tapply(data$nSteps, data$Date, sum), na.rm=TRUE)
+}
+simpleSE <- function(data) {
+	sd(tapply(data$nSteps, data$Date, sum), na.rm=TRUE) / sqrt(length(unique(data$Date)))
+}
+simple.m <- unlist(lapply(all, simpleM))
+simple.se <- unlist(lapply(all, simpleSE))
+simple <- data.frame(simple.m, simple.se)
+simple
+
+```
+
+Here it is important to note that the sd decreases when using predicted data. The estimate however is higher for prediction methods lm, poisson and means. 
+
+# Binning by day
+
+```{r binday}
+
+## Summarize the information by day. Drops interval and time. The binDay function is included in fitbitR:
+binDay
+binned <- lapply(all, binDay)
+
+## Quickly check how the distribution looks now that the data has been binned by day.
+lapply(1:5, function(i) { 
+	x <- binned[[i]]
+	hist(x$nSteps, col="light blue", main=paste("Prediction type:", names(binned)[i]), xlab="Number of steps by day", ylim=c(0, 35))
+	return(invisible())
+})
+
+## Are the means different due to the predictions?
+for(i in 2:5) {
+	print(t.test(binned[[1]]$nSteps, binned[[i]]$nSteps))
+}
+## No significative difference seen with t-tests.
+
+```
+
+
+# ARIMA
+
+```{r arima}
+
+arimaE <- function(data, type, order="Time") {
+	datac <- data[complete.cases(data),]
+	ts.c <- xts(datac$nSteps, order.by=datac[, order])
+	
+	## Autocorrelation plot
+	acf(ts.c, main=type)
+	
+	## Fit arima model
+	fit.a <- arima(ts.c)
+	
+	print(fit.a)
+	return(fit.a)
+	
+}
+arimed <- lapply(names(all), function(x) { arimaE(all[[x]], x) })
+names(arimed) <- names(all)
+
+## ARIMA with the binned data
+binari <- lapply(names(binned), function(x) { arimaE(binned[[x]], x, order="Date") })
+names(binari) <- names(binned)
+
+## The coefficients are the same using the binned data vs the simple method. However, the SD is smaller.
+binari.sum <- data.frame("Coef" = unlist(lapply(binari, coef)), "SE" = unlist(lapply(binari, function(x) sqrt(x$var.coef["intercept", "intercept"]))))
+binari.sum
+simple
+
+```
+
+Lets try with the forecast package in order to use auto.arima for selecting the ARIMA models.
+
+```{r forecast}
+
+## Similar to arimaE function but using auto.arima
+arimaF <- function(data, type, order="Time") {
+	datac <- data[complete.cases(data),]
+	ts.c <- xts(datac$nSteps, order.by=datac[, order])
+	
+	## Fit arima model
+	fit.a <- auto.arima(ts.c)
+	
+	print(fit.a)
+	return(fit.a)
+}
+
+## Fitting with auto-arima. Models were either ARIMA(2, 0, 3) or ARIMA(3, 0, 3).
+arimed2 <- lapply(names(all), function(x) { arimaF(all[[x]], x) })
+names(arimed2) <- names(all)
+
+## Fit the auto-arima. Note that all models ended up as ARIMA(0, 0, 1) which is equivalent to MA(1)
+binariauto <- lapply(names(binned), function(x) { arimaF(binned[[x]], x, order="Date") })
+names(binariauto) <- names(binned)
+
+## Summarize the information
+binariauto.sum <- data.frame("Coef" = unlist(lapply(binariauto, function(x){ coef(x)["intercept"]})), "SE" = unlist(lapply(binariauto, function(x) sqrt(x$var.coef["intercept", "intercept"]))))
+```
+
+# Summary
+
+```{r summary}
+simple
+binari.sum
+binariauto.sum
+```
+
+
+* Using the predicted information does not change the estimate significantly as verified using t-tests with the data binned by day. 
+* Estimating via sample mean and the SE leads to lower SE values. This could be because of not taking into account that the data are correlated: what you did day 1 can affect day 2.
+* Using an ARIMA(0, 0, 1) (equivalent to MA(1)) we can get estimates (very similar to the _simple_ ones) which take into account some of the information from the previous day (MA estimate). The SE goes up though.
+
+# Using q1()
+
+Now I can get the estimate using either the means or the auto.arima model using q1().
+
+```{r q1fun}
+## Using the mean method
+q1.mean <- lapply(all, q1, method="mean")
+do.call(rbind, q1.mean)
+
+## Using the auto.arima method
+q1.aa <- lapply(all, function(x) { y <- q1(x, method="auto.arima", acf=FALSE); y$Estimate })
+do.call(rbind, q1.aa)
+```
+
+
+# Reproducibility
+
+```{r reproducibility}
+sessionInfo()
+print(proc.time())
+```
+
+

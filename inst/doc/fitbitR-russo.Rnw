@@ -1,0 +1,255 @@
+%\VignetteEngine{knitr}
+%\VignetteIndexEntry{1}
+
+% Document type and font specification
+\documentclass[11pt]{article}
+
+% Margin specification
+% Check http://en.wikibooks.org/wiki/LaTeX/Page_Layout for more info
+\usepackage[margin = 1in]{geometry}
+\usepackage[nottoc,notlof,notlot,numbib]{tocbibind}
+
+% Some misc and math packages
+% Check http://en.wikibooks.org/wiki/LaTeX/Mathematics for more info
+\usepackage{fancyhdr}
+\usepackage{manfnt}
+\usepackage{pgf}
+\usepackage{amsmath,amsthm,amssymb,graphicx}
+\usepackage{amsfonts}
+\DeclareMathAlphabet{\mathpzc}{OT1}{pzc}{m}{it}
+\usepackage{bbm}
+\usepackage{float}
+\usepackage{mathrsfs} %mathscr{A}
+\usepackage{hyperref,graphicx}
+
+% Bibliography
+\usepackage[style=numeric,firstinits=true]{biblatex}
+% Specify bib files
+\addbibresource{fitbitR-russo.bib}
+
+% Color
+\usepackage{color}
+
+% For specifying the counter style of enumerate
+\usepackage{enumerate}
+
+% Page style definition
+\pagestyle{fancy}
+% Customize this to your liking.
+\lhead{By \myurlshort{https://github.com/russojhsph/fitbitR}{Russo}}\chead{}\rhead{}\lfoot{}\cfoot{\thepage}\rfoot{\today}
+
+% Line space
+\usepackage{setspace}
+% Default is normal, but un-comment below to your liking
+% \onehalfspacing
+% \doublespacing
+
+% Caption and figure def
+% Check http://en.wikibooks.org/wiki/LaTeX/Floats,_Figures_and_Captions for more info
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{wrapfig}
+
+% Math theorems shortcuts
+% Check http://en.wikibooks.org/wiki/LaTeX/Theorems for more info
+\usepackage{mathtools}
+\newtheorem{thm}{Theorem}
+\newtheorem{lem}{Lemma}[thm]
+\newtheorem{cor}{Corollary}[thm]
+\newtheorem{defi}{Definition}
+\newtheorem{conj}{Conjecture}
+\newtheorem{prop}{Proposition}
+\newtheorem{ex}{Example}
+\newtheorem{claim}{Claim}
+\newtheorem{fact}{Fact}
+\renewcommand{\qedsymbol}{$\blacksquare$}
+
+% Some inherited commands
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+\newcommand{\myurlshort}[2]{\href{#1}{\textcolor{gray}{\textsf{#2}}}}
+
+% knitr options
+<<setup, include=FALSE, cache=FALSE>>=
+# set global chunk options
+library(knitr)
+opts_chunk$set(fig.path='fig-', fig.align='center', fig.show='hold', fig.width=7, fig.height=7, out.width='.8\\linewidth', echo=FALSE, message=FALSE, warning=FALSE)
+options(width=70)
+@
+
+
+\begin{document}
+
+%\begin{titlepage}
+\begin{center}
+
+% Actual title
+{ \bfseries From reproducibly analyzing Fitbit activity data to visualizing results.}\\%[0.3cm]
+\textsc{JHSPH Biostat Qualifying Exam 2013 Take Home}\\
+\normalsize
+\end{center}
+% \end{titlepage}
+
+%%%%%%%%%% Write document %%%%%%%%%%%%%%
+
+\begin{abstract}
+	We analyzed the number of steps taken by an individual for a period of two months in 2012 that was recorded using a Fitbit\cite{fitbit} device. Personal measurement devices have been on the rise and there is demand for new statistical methods to deal with this type of data. We estimated the average number of steps taken per day, inferred the average activity pattern within a day, and determined whether there was a difference in the activity pattern between weekdays and weekends. To do so, we explored the possibility of predicting missing observations. Finally, we built a Shiny\cite{shiny} application that allows anyone to upload their own data and analyze with the methods implemented in this project.
+	
+	This project is completely reproducible and all the code has been compiled in the \texttt{fitbitR} R package\cite{fitbitR}.
+\end{abstract}
+
+<<preamble>>=
+## Libs used in this report
+library(fitbitR)
+require(ggplot2)
+require(gridExtra)
+require(xtable)
+
+## Load and preprocess the data
+data <- preprocess(fitbitData)
+@
+
+
+\section*{Introduction}
+
+Fitbit\cite{fitbit} is one of the popular devices on the market for collecting personal data such as the number of steps taken. Their devices can record activity data each minute and through the Fitbit API you can download your own activity data in different window intervals; for example every 5 minutes. Some enthusiasts have analyzed their own data\cite{oneyear} but questions remain such as what is the average number of steps taken per day, average activity patterns (within a day), and whether these patterns are different between weekends and weekdays. This project answers these questions and further allows users to analyze their own data through an application built with Shiny\cite{shiny}.
+
+In particular, we have data from a single individual for a period of two months. As shown in Figure \ref{fig:eda} (top) out of the 61 days, 8 are missing with no obvious difference between weekends and weekdays in the missing pattern. This individual regularly stops being active at 8pm on weekdays and 10pm on weekends, and then wakes up at 6 am on weekdays and 8 am on weekends as shown in Figure \ref{fig:eda} (bottom).
+
+Overall, there is indication of a difference in activity patterns between weekends and weekdays. Figure \ref{fig:eda} (top) shows that the high activity peaks are more consistent on weekdays although they do change by date, versus the high peaks on the weekends which are more variable.
+
+
+
+
+
+
+
+\section*{Methods and Results}
+
+\subsection*{Predicting missing observations}
+
+Four methods for predicting the missing observations have been implemented in \texttt{fitbitR}\cite{fitbitR}. The first one, \emph{overall-mean}, simply replaces the observations by the overall mean. The second one, \emph{means}, replaces the missing observations by the mean from similar observations: those from the same interval and day of the week. The third one, \emph{lm}, fits a linear regression model with a 10 degree of freedom natural spline on the Interval covariate, date and day of the week (dow). In other words using the following model:
+\[ Y = \beta_0 + \sum_{i=1}^{10} \beta_i ns_i + \beta_{date} + \beta_{dow} \]
+The predicted values are truncated at 0 for any negative predictions (if any). The fourth method, \emph{poisson}, fits a Poisson GLM using the same covariate structure as the \emph{lm} method. 
+The four methods, among others\footnote{Check reproduceAnalysis("pred") for more information.}, were evaluated by training on 70\% of the non-missing data and predicting on the remaining 30\%. The error measure is the root mean square prediction error (RMSPE). 
+
+<<eda, fig.cap="Exploratory plots of the number of steps (nSteps) for a specific individual along a two month period with data binned by 5 minute intervals. Top plot shows the data by Interval and Date separated by whether the day is a weekday or not. Missing observations (gray) are clearly visible. In addition, the activity peaks (light blue) are more consistent for weekdays while weekends seem more variable. Bottom plot shows the data in a in polar coordinates and we can notice that this individual regularly goes stops being active at 8pm and wakes at 6am on weekdays. On weekends, this individual wakes up at 8 am and has higher activity peaks on the afternoon.", fig.pos="H">>=
+
+p <- ggplot(data, aes(x=Interval, y=nSteps, group=Date, colour=Day, alpha=nSteps)) + geom_point(na.rm=TRUE)  + coord_polar() + facet_grid(~Weekend)
+p2 <- ggplot(data, aes(y = Date, x = Interval, colour = nSteps)) + geom_point(na.rm=TRUE) + facet_grid(~Weekend)
+grid.arrange(p2, p)
+@
+
+
+\emph{overall-mean} and \emph{means} are straight-forward methods to predict the missing observations, but they heavily assume that the missing observations are at random and that there is a consistent pattern across similar observations (for \emph{means}). \emph{overall-mean} was used as a benchmark for poor-prediction.
+
+\emph{lm} was used despite the non-normality of the data due to it's robustness. We were not expecting a good result from this method, but it did out-perform \emph{overall-mean} and \emph{means}. \emph{poisson} was used because the data are counts, despite overdispersion problems, and the flexibility of using natural splines. In both \emph{lm} and \emph{poisson}, 10 degrees of freedom on the natural splines worked better than using more.
+
+
+We found that the \emph{lm} and \emph{poisson} methods were practically tied but did not improve the RMSPE by much: \emph{overall-mean} 102.9 (SE 3.689), \emph{means} 109.9 (SE 2.898), \emph{lm} 99.7 (SE 3.283), and \emph{poisson} 99.89 (SE 3.223). Surprisingly \emph{means} was outperformed by \emph{overall-mean}, which could an indicator that the error measure is sensible to outliers and a robust one should be used.
+
+\subsection*{Average number of steps taken per day}
+
+Once the data is binned by day, the straightforward method to estimate the average number of steps taken by day is by calculating the sample mean. The problem with this method is that it ignores the correlation in the number of steps taken between day $i$ and day $i + 1$. To deal with this structure, we fitted several ARIMA models\cite{autoarima} before choosing to use an ARIMA(0, 0, 1) [equivalent to MA(1)] model. 
+
+While the naive method has lower standard errors than when using the ARIMA(0, 0, 1) model\footnote{Check reproduceAnalysis("Q1") for more information.}, we argue that this is because the naive model underestimates the actual number of steps taken per day by assuming that the measurements are independent. The results are shown in Table \ref{tab1} for the original data and the four prediction methods. Note that there were no significant differences (t-tests for the difference in sample mean, data not shown) between the original data and the predicted sets.
+
+<<q1, results='asis'>>=
+## Complete predictions
+types <- c("lm", "poisson", "means", "overall-mean")
+datap <- lapply(types, function(x) {
+    fitbitPred(data, method = x)
+})
+
+## All data
+all <- c(list(data), datap)
+names(all) <- c("original", types)
+
+q1.aa <- lapply(all, function(x) {
+    y <- q1(x, method = "auto.arima", acf = FALSE)
+    y$Estimate
+})
+q1 <- do.call(rbind, q1.aa)
+print(xtable(q1, caption="Estimated average number of steps taken per day using an ARIMA(0, 0, 1) model. The estimate, standard error and 95 percent confidence intervals (based on the t-distribution) are shown for the original data and for the four prediction methods.", lab="tab1"))
+@
+
+\subsection*{Average activity pattern}
+
+
+
+
+To infer the average activity pattern we again compared two methods. The naive method is to take the mean of the observations grouped by interval. This method produces a highly variable estimate of the average activity pattern as shown in the appendix (Figure 3). It is thus important a smoother function in order to have a more interpretable picture of the average activity pattern.
+
+For this purpose we fitted a General Additive Model (GAM) using the quasipoisson family and cubic regression splines. The quasipoisson family was chosen because the data is a set of counts with high overdispersion. The cubic regression splines are useful to generate a smooth curve that can be easier to interpret. Figure 2 (top) shows the overall activity pattern. From the result we can interpret that this person has a high peak of activity between 6 and 9 am. Then it stabilizes from 10 am to 4 pm. There is a slight increase at 5 and 6 pm and decreases until very low levels at 10 pm. The person is rarely active from 10 pm to 5 am.
+
+<<q23, fig.keep="none">>=
+q2.gam <- q2(data, "gam")
+q3.weekend <- q3(data, "weekend")
+@
+
+<<patt, fig.cap="Average activity pattern over time (within a day). Top plot uses all the data while the bottom plot separates the data by whether it's a weekend or a weekday Blue curves are GAM models fitted for the quasipoisson family and with cubic regression splines.", fig.pos="H">>=
+
+grid.arrange(q2.gam$plot, q3.weekend$plot)
+@
+
+\subsection*{Weekdays vs weekends}
+
+<<q3, echo=FALSE>>=
+ts <- (q3.weekend$fit$coef["WeekendWeekend"]) / sqrt(vcov(q3.weekend$fit)["WeekendWeekend", "WeekendWeekend"])
+pval <- pt(ts, q3.weekend$fit$df.null, lower=FALSE) * 2
+@
+
+
+
+To answer the question of whether there is a difference in activity patterns between weekdays and weekends, we fit a GAM model using the quasipoisson family and cubic regression splines as described previously, but with the additional covariate of whether the observation corresponded to a weekday or weekend. The corresponding t value for the \emph{Weekend} coefficient is \Sexpr{ts} with a p-value of \Sexpr{pval}. Therefore, there is a significant difference in the activity patterns between weekdays and weekends. This result was invariant to whether the original data or one with predicted values was used.
+
+Figure 2 (bottom) we can notice how this individual has two activity peaks during weekdays as described previously. On weekends, this individual gets active later in the morning and keeps a rather similar activity level during the day (except for lunch time) and eventually stops being active later on the day compared to weekdays.
+
+
+\section*{Conclusions}
+
+This individual takes an average of 10672 95\% CI:(9188, 12157) steps per day, gets active early in the morning before stabilizing until his/her work is probably over at 5pm and goes home. During weekends, he/she gets active later during the day and overall keeps a higher level of activity on weekends.
+
+The methods developed in this project should prove helpful to other individuals who want to analyze their Fitbit\cite{fitbit} activity data using the Shiny\cite{shiny} application implemented in \texttt{fitbitR}\cite{fitbitR}. The Shiny application includes the prediction methods although they did not affect the results in this current analysis. Thus, there is room for improving the prediction step.
+
+% For references, uncomment and remember to use the following series
+% when compling the pdf:
+% R Sweave, pdflatex, bibtex, pdflatex, pdflatex, open pdf
+
+\printbibliography
+
+\newpage
+\appendix
+
+
+
+\section{Average activity pattern: mean method}
+
+<<q2mean, fig.cap="Average activity pattern over time (within a day) using the naive mean method.", fig.pos="H">>=
+q2.mean <- q2(data, "mean")
+@
+
+\section{Running the Shiny application}
+
+To run the Shiny application, you just have to run the following commands from R. Sadly, we did not get an account in the Beta Shiny server by the due time despite our efforts to get one.
+
+<<shiny, echo=TRUE, eval=FALSE>>=
+library(fitbitR)
+fitbitShine()
+@
+
+
+\section{Reproducibility}
+
+Please check \url{https://github.com/russojhsph/fitbitR} for details on how to install the \emph{fitbitR} package and reproduce the results including this report.
+
+Note that \texttt{reproduceAnalysis('all')} takes around 3 minutes to complete.
+
+
+% Uncomment if you want to add the R session information
+%\tiny
+%<<info, results='asis', echo = FALSE>>=
+%toLatex(sessionInfo())
+%@
+
+
+
+\end{document}
