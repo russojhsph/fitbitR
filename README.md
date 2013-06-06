@@ -14,3 +14,17 @@ install_github(username='rstudio', repo='markdown')
 ## This is the main package.
 install_github("fitbitR", "russojhsph")
 ```
+
+## Shiny Application
+
+
+```S
+## Either run from fitbitR
+library(fitbitR)
+fitbitShine()
+
+## Or from the web
+library(shiny)
+runUrl("https://github.com/russojhsph/fitbitR/archive/master.zip",
+subdir = "inst/fitbitShine")
+```
